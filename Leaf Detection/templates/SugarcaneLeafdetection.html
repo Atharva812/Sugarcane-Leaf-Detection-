@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sugarcane Leaf Disease Detection</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-image: url("{{ url_for('static', filename='1289766-download-farm-wallpaper-1920x1200.jpg') }}");
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            font-family: 'Arial', sans-serif;
+        }
+
+        #camera-feed {
+            width: 100%;
+            max-width: 600px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #drag-and-drop {
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-top: 20px;
+        }
+
+        #cloud-arrow-icon {
+            font-size: 32px;
+            color: #007BFF;
+        }
+
+        #button-text {
+            font-size: 18px;
+            color: #007BFF;
+            cursor: pointer;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        #camera-button,
+        #capture-button {
+            font-size: 18px;
+            color: #ffffff;
+            background-color: #007BFF;
+            border: none;
+            padding: 10px 20px;
+            margin-top: 20px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s ease;
+        }
+
+        #camera-button:hover,
+        #capture-button:hover {
+            background-color: #0056b3;
+        }
+
+        #photo-box {
+            margin-top: 20px;
+            display: none;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #photo-element {
+            width: 100%;
+            border-radius: 8px;
+        }
+
+        #prediction-box {
+            margin-top: 20px;
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        #prediction-result,
+        #confidence {
+            font-size: 24px;
+            color: #007BFF;
+            margin-top: 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <video id="camera-feed" autoplay playsinline style="display: none;"></video>
+    <canvas id="captured-image" style="display: none;"></canvas>
+    <div id="drag-and-drop">
+        <i class="fas fa-cloud-upload-alt" id="cloud-arrow-icon"></i>
+        <span id="button-text">Upload from device</span>
+        <input type="file" id="file-input" accept=".jpg, .jpeg, .png" multiple style="display: none;">
+    </div>
+    <div id="photo-box">
+        <img id="photo-element" alt="Captured Photo">
+    </div>
+    <div id="prediction-box">
+        <div id="prediction-result"></div>
+        <div id="confidence"></div>
+    </div>
+    <div>
+        <button id="camera-button">Access Camera</button>
+        <button id="capture-button">Capture Photo</button>
+    </div>
+
+    <script>
+        const cameraFeed = document.getElementById('camera-feed');
+        const capturedImage = document.getElementById('captured-image');
+        const fileInput = document.getElementById('file-input');
+        const cameraButton = document.getElementById('camera-button');
+        const captureButton = document.getElementById('capture-button');
+        const photoBox = document.getElementById('photo-box');
+        const predictionBox = document.getElementById('prediction-box');
+        const photoElement = document.getElementById('photo-element');
+        const predictionResult = document.getElementById('prediction-result');
+        const confidenceElement = document.getElementById('confidence');
+        let stream;
+        let capturedImageData = null;
+
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                cameraFeed.srcObject = stream;
+                cameraFeed.style.display = 'block';
+                cameraButton.textContent = 'Stop Camera';
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                const tracks = stream.getTracks();
+                tracks.forEach((track) => {
+                    track.stop();
+                });
+                cameraFeed.srcObject = null;
+                cameraFeed.style.display = 'none';
+                cameraButton.textContent = 'Access Camera';
+            }
+        }
+
+        async function capturePhoto() {
+            if (stream) {
+                capturedImage.width = cameraFeed.videoWidth;
+                capturedImage.height = cameraFeed.videoHeight;
+                capturedImage.getContext('2d').drawImage(cameraFeed, 0, 0, capturedImage.width, capturedImage.height);
+                capturedImageData = capturedImage.toDataURL('image/jpeg');
+                // Resize the image to 256x256
+                const resizedImageData = await resizeImage(capturedImageData, 256, 256);
+                photoElement.src = resizedImageData;
+                photoBox.style.display = 'block';
+                updatePrediction(resizedImageData);
+            } else {
+                alert('Access the camera first before capturing a photo.');
+            }
+        }
+
+        function handleFileUpload(event) {
+            const fileInput = event.target;
+            if (fileInput.files.length > 0) {
+                const uploadedFile = fileInput.files[0];
+                if (uploadedFile.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = async function (e) {
+                        // Resize the image to 256x256
+                        const resizedImageData = await resizeImage(e.target.result, 256, 256);
+                        photoElement.src = resizedImageData;
+                        photoBox.style.display = 'block';
+                        capturedImageData = resizedImageData;
+                        updatePrediction(resizedImageData);
+                    };
+                    reader.readAsDataURL(uploadedFile);
+                } else {
+                    alert('Please upload a valid image file (e.g., JPG, JPEG, or PNG).');
+                }
+            }
+        }
+
+        function updatePrediction(imageData) {
+            if (imageData) {
+                predictionBox.style.display = 'block';
+                predictImage(imageData);
+            } else {
+                alert('Capture or upload an image first.');
+            }
+        }
+
+        async function predictImage(imageData) {
+            try {
+                const response = await fetch('/process-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ image: imageData }),
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    predictionResult.textContent = `Prediction: ${data.predicted_class};`
+                    confidenceElement.textContent = `Confidence: ${Math.round(data.confidence * 100)}%;`
+                } else {
+                    alert('Error processing image on the server.');
+                }
+            } catch (error) {
+                console.error('Error processing image:', error);
+                alert('An error occurred while processing the image.');
+            }
+        }
+
+        async function resizeImage(imageData, width, height) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg'));
+                };
+                img.onerror = reject;
+                img.src = imageData;
+            });
+        }
+
+        cameraButton.addEventListener('click', () => {
+            if (cameraButton.textContent === 'Access Camera') {
+                startCamera();
+            } else {
+                stopCamera();
+            }
+        });
+
+        captureButton.addEventListener('click', capturePhoto);
+        const dragAndDrop = document.getElementById('drag-and-drop');
+        dragAndDrop.addEventListener('click', () => {
+            fileInput.click();
+        });
+        fileInput.addEventListener('change', handleFileUpload);
+    </script>
+</body>
+
+</html>
